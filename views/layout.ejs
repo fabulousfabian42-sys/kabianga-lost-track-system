@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <nav class="navbar">
+      <div>
+        <strong>University of Kabianga Lost & Track</strong>
+      </div>
+      <div>
+        <% if (currentUser) { %>
+          <span><%= currentUser.name %> | <%= currentUser.role.toUpperCase() %></span>
+          <a href="/dashboard">Dashboard</a>
+          <a href="/reports">Reports</a>
+          <form action="/logout" method="post" style="display:inline;">
+            <button type="submit" style="margin-left:12px;">Logout</button>
+          </form>
+        <% } else { %>
+          <a href="/">Login</a>
+          <a href="/register">Register</a>
+        <% } %>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <div class="container">
+      <h1 class="page-title"><%= title %></h1>
+      <%- body %>
+    </div>
+  </main>
+
+  <footer>
+    University of Kabianga lost and found tracking system.
+  </footer>
+</body>
+</html>

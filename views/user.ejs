@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <a href="/" class="logo">
+      <img src="/images/logo.svg" alt="UoK Logo">
+      <div>
+        <div class="title">UoK Lost & Found</div>
+        <div class="subtitle">Security Office</div>
+      </div>
+    </a>
+    <div class="user-info">
+      <span><%= currentUser.name %> | <%= currentUser.role === 'staff' ? 'STAFF' : 'STUDENT' %></span>
+      <a href="/reports" class="btn">Reports</a>
+      <form action="/logout" method="post" style="display:inline;">
+        <button type="submit" class="btn">Logout</button>
+      </form>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="hero-content">
+      <h1>Lost something? We can help.</h1>
+      <p>Browse items currently held at the Security Office. If you see yours, submit a claim and we will contact you.</p>
+      <div class="buttons">
+        <a href="#report" class="btn">
+          <img src="/images/report-icon.svg" alt="Report"> Report a Lost Item
+        </a>
+        <a href="#browse" class="btn">
+          <img src="/images/browse-icon.svg" alt="Browse"> Browse Security Office Items
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <section id="report" class="section">
+      <h2>Report a Lost or Found Item</h2>
+      <form action="/report-item" method="post" enctype="multipart/form-data" style="max-width: 600px; margin: 0 auto;">
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" name="title" required placeholder="Item title">
+        </div>
+        <div class="form-group">
+          <label for="description">Description</label>
+          <textarea id="description" name="description" rows="4" required placeholder="Describe the item and circumstances"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="location">Location</label>
+          <input type="text" id="location" name="location" required placeholder="Where it was lost/found">
+        </div>
+        <div class="form-group">
+          <label for="phone">Phone Number</label>
+          <input type="tel" id="phone" name="phone" placeholder="Your contact number (optional)">
+        </div>
+        <div class="form-group">
+          <label for="type">Type</label>
+          <select id="type" name="type" required>
+            <option value="lost">Lost</option>
+            <option value="found">Found</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="report-category">Category</label>
+          <select id="report-category" name="category" required>
+            <option value="Electronics">Electronics</option>
+            <option value="Books">Books</option>
+            <option value="Clothing">Clothing</option>
+            <option value="Keys">Keys</option>
+            <option value="ID/Cards">ID/Cards</option>
+            <option value="Bags">Bags</option>
+            <option value="Sports Equipment">Sports Equipment</option>
+            <option value="Other" selected>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="image">Item Image (Optional)</label>
+          <input type="file" id="image" name="image" accept="image/*">
+          <small>Upload a photo of the item for easier identification</small>
+        </div>
+        <button type="submit" class="btn-primary">Submit Report</button>
+      </form>
+    </section>
+
+    <section id="browse" class="section">
+      <h2>Items at the Security Office</h2>
+      <p>These items have been found and submitted for safekeeping. Recognise something? Click to submit a claim.</p>
+
+      <div class="filters">
+        <div class="search-box">
+          <img src="/images/search-icon.svg" alt="Search">
+          <input type="text" placeholder="Search by name, location, or description..." id="search">
+        </div>
+        <div class="filter-select">
+          <img src="/images/filter-icon.svg" alt="Filter">
+          <select id="filter-category">
+            <option value="">All</option>
+            <option value="Electronics">Electronics</option>
+            <option value="Books">Books</option>
+            <option value="Clothing">Clothing</option>
+            <option value="Keys">Keys</option>
+            <option value="ID/Cards">ID/Cards</option>
+            <option value="Bags">Bags</option>
+            <option value="Sports Equipment">Sports Equipment</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="items-grid" id="items-grid">
+        <% claimables.forEach(item => { %>
+          <div class="item-card" data-title="<%= item.title.toLowerCase() %>" data-description="<%= item.description.toLowerCase() %>" data-location="<%= item.location.toLowerCase() %>" data-reporter="<%= item.reporter.toLowerCase() %>" data-category="<%= item.category %>">
+            <img src="<%= item.image || '/images/item-placeholder.svg' %>" alt="<%= item.title %>">
+            <div class="content">
+              <h3><%= item.title %></h3>
+              <p><strong>Category:</strong> <%= item.category %></p>
+              <p><strong>Location:</strong> <%= item.location %></p>
+              <p><strong>Description:</strong> <%= item.description %></p>
+              <p><strong>Reported by:</strong> <%= item.reporter %></p>
+              <% if (item.phone) { %>
+                <p><strong>Contact:</strong> <%= item.phone %></p>
+              <% } %>
+              <div class="actions">
+                <span class="status status-found">Found</span>
+                <form action="/items/<%= item.id %>/request-claim" method="post">
+                  <button type="submit" class="btn">Request Claim</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        <% }) %>
+        <% if (claimables.length === 0) { %>
+          <div class="loading">No items available for claim at the moment.</div>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Your Reports</h2>
+      <div class="items-grid">
+        <% userItems.forEach(item => { %>
+          <div class="item-card">
+            <img src="<%= item.image || '/images/item-placeholder.svg' %>" alt="<%= item.title %>">
+            <div class="content">
+              <h3><%= item.title %></h3>
+              <p><strong>Category:</strong> <%= item.category %></p>
+              <p><strong>Type:</strong> <%= item.type %></p>
+              <p><strong>Location:</strong> <%= item.location %></p>
+              <p><strong>Description:</strong> <%= item.description %></p>
+              <% if (item.phone) { %>
+                <p><strong>Contact:</strong> <%= item.phone %></p>
+              <% } %>
+              <div class="actions">
+                <span class="status status-<%= item.status %>"><%= item.status.replace(/_/g, ' ') %></span>
+              </div>
+            </div>
+          </div>
+        <% }) %>
+        <% if (userItems.length === 0) { %>
+          <div class="loading">You haven't reported any items yet.</div>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Your Claim Requests</h2>
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Status</th><th>Requested</th></tr>
+        </thead>
+        <tbody>
+          <% myClaims.forEach(claim => { %>
+            <tr>
+              <td><%= claim.item_title %></td>
+              <td><span class="status-pill status-<%= claim.status %>"><%= claim.status %></span></td>
+              <td><%= new Date(claim.requested_at).toLocaleString() %></td>
+            </tr>
+          <% }) %>
+          <% if (myClaims.length === 0) { %>
+            <tr><td colspan="3">No claim requests yet.</td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    <img src="/images/logo.svg" alt="UoK Logo">
+    <p>© 2026 University of Kabianga Security Office.</p>
+    <p>Items not claimed within 90 days may be archived or disposed of per university policy.</p>
+  </footer>
+
+  <script>
+    const searchInput = document.getElementById('search');
+    const categorySelect = document.getElementById('filter-category');
+    const itemCards = Array.from(document.querySelectorAll('.item-card'));
+
+    function filterItems() {
+      const text = searchInput.value.toLowerCase();
+      const category = categorySelect.value;
+
+      itemCards.forEach(card => {
+        const title = card.dataset.title || '';
+        const description = card.dataset.description || '';
+        const location = card.dataset.location || '';
+        const reporter = card.dataset.reporter || '';
+        const itemCategory = card.dataset.category || '';
+
+        const matchesText = text === '' || [title, description, location, reporter].some(field => field.includes(text));
+        const matchesCategory = category === '' || itemCategory === category;
+
+        card.style.display = matchesText && matchesCategory ? '' : 'none';
+      });
+    }
+
+    if (searchInput && categorySelect) {
+      searchInput.addEventListener('input', filterItems);
+      categorySelect.addEventListener('change', filterItems);
+    }
+  </script>
+</body>
+</html>

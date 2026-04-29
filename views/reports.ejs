@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <nav class="navbar">
+      <div><strong>System Reports</strong></div>
+      <div>
+        <% if (currentUser) { %>
+          <span><%= currentUser.name %> | <%= currentUser.role.toUpperCase() %></span>
+          <a href="/dashboard">Dashboard</a>
+          <form action="/logout" method="post" style="display:inline;">
+            <button type="submit">Logout</button>
+          </form>
+        <% } %>
+      </div>
+    </nav>
+  </header>
+  <main>
+    <div class="container">
+      <section>
+        <h2>All Reported Items</h2>
+        <table>
+          <thead>
+            <tr><th>Title</th><th>Type</th><th>Status</th><th>Reporter</th><th>Updated</th></tr>
+          </thead>
+          <tbody>
+            <% items.forEach(item => { %>
+              <tr>
+                <td><%= item.title %></td>
+                <td><%= item.type %></td>
+                <td><span class="status-pill status-<%= item.status %>"><%= item.status.replace(/_/g, ' ') %></span></td>
+                <td><%= item.reporter %></td>
+                <td><%= new Date(item.updated_at).toLocaleString() %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </section>
+      <section style="margin-top:24px;">
+        <h2>Claim Records</h2>
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Requested by</th><th>Status</th><th>Requested</th></tr>
+          </thead>
+          <tbody>
+            <% claims.forEach(claim => { %>
+              <tr>
+                <td><%= claim.item_title %></td>
+                <td><%= claim.claimant %></td>
+                <td><%= claim.status %></td>
+                <td><%= new Date(claim.requested_at).toLocaleString() %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

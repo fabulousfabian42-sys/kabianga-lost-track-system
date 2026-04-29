@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: kabianga-lost-track
+    env: node
+    plan: free
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /health
+    buildCommand: npm install
+    startCommand: npm start

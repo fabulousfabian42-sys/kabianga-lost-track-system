@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <nav class="navbar">
+      <div><strong>Security Office</strong></div>
+      <div>
+        <span><%= currentUser.name %> | SECURITY</span>
+        <a href="/admin">Admin Dashboard</a>
+        <a href="/reports">Reports</a>
+        <form action="/logout" method="post" style="display:inline;">
+          <button type="submit">Logout</button>
+        </form>
+      </div>
+    </nav>
+  </header>
+  <main>
+    <div class="container">
+      <section>
+        <h2>All reported items</h2>
+        <table>
+          <thead>
+            <tr><th>Title</th><th>Type</th><th>Status</th><th>Reporter</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <% items.forEach(item => { %>
+              <tr>
+                <td><%= item.title %></td>
+                <td><%= item.type %></td>
+                <td><span class="status-pill status-<%= item.status %>"><%= item.status.replace(/_/g, ' ') %></span></td>
+                <td><%= item.reporter %></td>
+                <td>
+                  <% if (item.type === 'found' && item.status === 'with_security') { %>
+                    <form action="/items/<%= item.id %>/prepare-claim" method="post" style="display:inline;">
+                      <button type="submit">Prepare Claim</button>
+                    </form>
+                  <% } %>
+                  <% if (item.type === 'lost' && item.status === 'reported_lost') { %>
+                    <form action="/items/<%= item.id %>/mark-claimed" method="post" style="display:inline;">
+                      <button type="submit">Return to Owner</button>
+                    </form>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </section>
+      <section style="margin-top:24px;">
+        <h2>Pending claim requests</h2>
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Claimant</th><th>Requested</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <% claims.forEach(claim => { %>
+              <tr>
+                <td><%= claim.item_title %></td>
+                <td><%= claim.claimant %></td>
+                <td><%= new Date(claim.requested_at).toLocaleString() %></td>
+                <td>
+                  <form action="/claims/<%= claim.id %>/approve" method="post" style="display:inline; margin-right:8px;">
+                    <button type="submit">Approve</button>
+                  </form>
+                  <form action="/claims/<%= claim.id %>/reject" method="post" style="display:inline;">
+                    <button type="submit">Reject</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
