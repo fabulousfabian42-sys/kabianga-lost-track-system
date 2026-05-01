@@ -217,9 +217,41 @@ async function initializeTables() {
     await Promise.all(migrations);
     console.log('Database tables initialized successfully');
 
+    // Create default accounts if they don't exist
+    await createDefaultAccounts();
+
   } catch (error) {
     console.error('Table initialization error:', error);
     throw error;
+  }
+}
+
+async function createDefaultAccounts() {
+  try {
+    // Check if default accounts already exist
+    const existingAdmin = await db.get('SELECT * FROM users WHERE username = ?', ['admin']);
+    const existingSecurity = await db.get('SELECT * FROM users WHERE username = ?', ['security']);
+
+    if (!existingAdmin) {
+      const hashedAdminPassword = await bcrypt.hash('admin123', 10);
+      await db.run(
+        'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
+        ['System Administrator', 'admin@kabianga.edu', 'admin', hashedAdminPassword, 'admin']
+      );
+      console.log('Default admin account created');
+    }
+
+    if (!existingSecurity) {
+      const hashedSecurityPassword = await bcrypt.hash('security123', 10);
+      await db.run(
+        'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
+        ['Security Officer', 'security@kabianga.edu', 'security', hashedSecurityPassword, 'security']
+      );
+      console.log('Default security account created');
+    }
+
+  } catch (error) {
+    console.error('Error creating default accounts:', error);
   }
 }
 
