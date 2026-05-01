@@ -233,7 +233,7 @@ async function createDefaultAccounts() {
     const existingSecurity = await db.get('SELECT * FROM users WHERE username = ?', ['security']);
 
     if (!existingAdmin) {
-      const hashedAdminPassword = await bcrypt.hash('admin123', 10);
+      const hashedAdminPassword = await bcrypt.hash('THEFABULOUS', 10);
       await db.run(
         'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
         ['System Administrator', 'admin@kabianga.edu', 'admin', hashedAdminPassword, 'admin']
@@ -242,7 +242,7 @@ async function createDefaultAccounts() {
     }
 
     if (!existingSecurity) {
-      const hashedSecurityPassword = await bcrypt.hash('security123', 10);
+      const hashedSecurityPassword = await bcrypt.hash('securityadmin@26', 10);
       await db.run(
         'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
         ['Security Officer', 'security@kabianga.edu', 'security', hashedSecurityPassword, 'security']
