@@ -1,12 +1,12 @@
 const express = require('express');
 const session = require('express-session');
-const SQLiteStore = require('connect-sqlite3')(session);
+const pgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcrypt');
 const path = require('path');
-const sqlite3 = require('sqlite3');
-const { promisify } = require('util');
+const { Pool } = require('pg');
 const multer = require('multer');
 const fs = require('fs');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -68,6 +68,50 @@ app.use((req, res, next) => {
   next();
 });
 
+// PostgreSQL Connection Pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+});
+
+// Database query helper with error handling
+const db = {
+  async run(query, params = []) {
+    try {
+      const result = await pool.query(query, params);
+      return result;
+    } catch (error) {
+      console.error('Database query error:', { query, error });
+      throw error;
+    }
+  },
+  async get(query, params = []) {
+    try {
+      const result = await pool.query(query, params);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Database query error:', { query, error });
+      throw error;
+    }
+  },
+  async all(query, params = []) {
+    try {
+      const result = await pool.query(query, params);
+      return result.rows || [];
+    } catch (error) {
+      console.error('Database query error:', { query, error });
+      throw error;
+    }
+  }
+};
+
 // Configure multer for file uploads with error handling
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -100,16 +144,19 @@ const upload = multer({
   }
 });
 
-// Enhanced session configuration
+// Enhanced session configuration with PostgreSQL
 app.use(
   session({
-    store: new SQLiteStore({ db: 'sessions.db', dir: '.' }),
+    store: new pgSession({
+      pool: pool,
+      tableName: 'session'
+    }),
     secret: process.env.SESSION_SECRET || 'kabianga-tracker-secret-' + Date.now(),
     resave: false,
     saveUninitialized: false,
     cookie: {
       maxAge: 1000 * 60 * 60 * 4, // 4 hours
-      secure: false, // Set to true in production with HTTPS
+      secure: process.env.NODE_ENV === 'production', // Use HTTPS in production
       httpOnly: true,
       sameSite: 'strict'
     }
@@ -120,58 +167,52 @@ let db;
 let server;
 
 async function createDatabase() {
-  return new Promise((resolve, reject) => {
-    try {
-      console.log('Initializing database connection...');
-      db = new sqlite3.Database(path.join(__dirname, 'kabianga.db'), async (err) => {
-        if (err) {
-          console.error('Database connection error:', err);
-          reject(err);
-          return;
-        }
-        console.log('Database connected successfully');
+  try {
+    console.log('Initializing PostgreSQL database connection...');
+    
+    // Test connection
+    const testResult = await pool.query('SELECT NOW()');
+    console.log('Database connection successful');
 
-        // Promisify database methods with error handling
-        db.run = promisify(db.run.bind(db));
-        db.get = promisify(db.get.bind(db));
-        db.all = promisify(db.all.bind(db));
-        db.exec = promisify(db.exec.bind(db));
-
-        try {
-          console.log('Testing database connection...');
-          // Test database connection
-          const row = await db.get('SELECT 1 as test');
-          console.log('Database test query successful, row:', row);
-
-          await initializeTables();
-          console.log('Database initialization completed');
-          resolve();
-        } catch (initError) {
-          console.error('Database initialization failed:', initError);
-          reject(initError);
-        }
-      });
-    } catch (error) {
-      console.error('Database initialization error:', error);
-      reject(error);
-    }
-  });
+    // Initialize tables
+    await initializeTables();
+    console.log('Database initialization completed');
+  } catch (error) {
+    console.error('Database initialization error:', error);
+    throw error;
+  }
 }
 
 async function initializeTables() {
   try {
-    await db.exec(`
+    // Create session table for express-session
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "session" (
+        "sid" varchar NOT NULL COLLATE "default",
+        "sess" json NOT NULL,
+        "expire" timestamp(6) NOT NULL,
+        PRIMARY KEY ("sid")
+      );
+      CREATE INDEX IF NOT EXISTS "IDX_session_expire" on "session" ("expire");
+    `);
+
+    // Create users table
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         username TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
-        role TEXT NOT NULL
+        role TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // Create items table
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         title TEXT NOT NULL,
         description TEXT NOT NULL,
         location TEXT NOT NULL,
@@ -180,41 +221,25 @@ async function initializeTables() {
         image TEXT,
         phone TEXT,
         status TEXT NOT NULL,
-        reported_by INTEGER NOT NULL,
-        claimed_by INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(reported_by) REFERENCES users(id),
-        FOREIGN KEY(claimed_by) REFERENCES users(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS claims (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        requested_at TEXT NOT NULL,
-        processed_at TEXT,
-        FOREIGN KEY(item_id) REFERENCES items(id),
-        FOREIGN KEY(user_id) REFERENCES users(id)
+        reported_by INTEGER NOT NULL REFERENCES users(id),
+        claimed_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // Check and add missing columns
-    const columns = await db.all("PRAGMA table_info(items)");
-    const migrations = [];
+    // Create claims table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS claims (
+        id SERIAL PRIMARY KEY,
+        item_id INTEGER NOT NULL REFERENCES items(id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        status TEXT NOT NULL,
+        requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        processed_at TIMESTAMP
+      );
+    `);
 
-    if (!columns.some(column => column.name === 'category')) {
-      migrations.push(db.run("ALTER TABLE items ADD COLUMN category TEXT NOT NULL DEFAULT 'Other'"));
-    }
-    if (!columns.some(column => column.name === 'image')) {
-      migrations.push(db.run("ALTER TABLE items ADD COLUMN image TEXT"));
-    }
-    if (!columns.some(column => column.name === 'phone')) {
-      migrations.push(db.run("ALTER TABLE items ADD COLUMN phone TEXT"));
-    }
-
-    await Promise.all(migrations);
     console.log('Database tables initialized successfully');
 
     // Create default accounts if they don't exist
@@ -229,13 +254,13 @@ async function initializeTables() {
 async function createDefaultAccounts() {
   try {
     // Check if default accounts already exist
-    const existingAdmin = await db.get('SELECT * FROM users WHERE username = ?', ['admin']);
-    const existingSecurity = await db.get('SELECT * FROM users WHERE username = ?', ['security']);
+    const existingAdmin = await db.get('SELECT * FROM users WHERE username = $1', ['admin']);
+    const existingSecurity = await db.get('SELECT * FROM users WHERE username = $1', ['security']);
 
     if (!existingAdmin) {
       const hashedAdminPassword = await bcrypt.hash('THEFABULOUS', 10);
       await db.run(
-        'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO users (name, email, username, password, role) VALUES ($1, $2, $3, $4, $5)',
         ['System Administrator', 'admin@kabianga.edu', 'admin', hashedAdminPassword, 'admin']
       );
       console.log('Default admin account created');
@@ -244,7 +269,7 @@ async function createDefaultAccounts() {
     if (!existingSecurity) {
       const hashedSecurityPassword = await bcrypt.hash('securityadmin@26', 10);
       await db.run(
-        'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO users (name, email, username, password, role) VALUES ($1, $2, $3, $4, $5)',
         ['Security Officer', 'security@kabianga.edu', 'security', hashedSecurityPassword, 'security']
       );
       console.log('Default security account created');
@@ -293,7 +318,7 @@ app.get('/login', (req, res) => {
 app.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    const user = await db.get('SELECT * FROM users WHERE username = ?', [username]);
+    const user = await db.get('SELECT * FROM users WHERE username = $1', [username]);
 
     if (!user) {
       return res.render('login', { title: 'Kabianga Lost & Track Login', error: 'Invalid credentials.' });
@@ -337,14 +362,14 @@ app.post('/register', async (req, res) => {
       return res.render('register', { title: 'University Registration', error: 'Invalid role selected.' });
     }
 
-    const existing = await db.get('SELECT * FROM users WHERE username = ? OR email = ?', [username, email]);
+    const existing = await db.get('SELECT * FROM users WHERE username = $1 OR email = $2', [username, email]);
     if (existing) {
       return res.render('register', { title: 'University Registration', error: 'Email or username already exists.' });
     }
 
     const hashed = await bcrypt.hash(password, 10);
     await db.run(
-      'INSERT INTO users (name, email, username, password, role) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO users (name, email, username, password, role) VALUES ($1, $2, $3, $4, $5)',
       [name, email, username, hashed, role]
     );
 
@@ -416,7 +441,7 @@ app.get('/security', requireLogin, requireRole('security'), async (req, res) => 
 app.get('/user', requireLogin, async (req, res) => {
   if (!['user', 'staff'].includes(req.session.user.role)) return res.redirect('/dashboard');
   const user = req.session.user;
-  const myItems = await db.all('SELECT * FROM items WHERE reported_by = ? ORDER BY updated_at DESC', [user.id]);
+  const myItems = await db.all('SELECT * FROM items WHERE reported_by = $1 ORDER BY updated_at DESC', [user.id]);
   const availableClaims = await db.all(
     `SELECT items.*, users.name AS reporter FROM items JOIN users ON items.reported_by = users.id WHERE items.type = 'found' AND items.status = 'ready_for_claim' AND items.reported_by != ? ORDER BY items.updated_at DESC`,
     [user.id]
@@ -443,7 +468,7 @@ app.post('/report-item', requireLogin, upload.single('image'), async (req, res) 
 
     await db.run(
       `INSERT INTO items (title, description, location, type, category, image, phone, status, reported_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [title, description, location, type, category, imagePath, phone, status, req.session.user.id, now, now]
     );
     res.redirect('/user');
@@ -456,7 +481,7 @@ app.post('/report-item', requireLogin, upload.single('image'), async (req, res) 
 app.post('/items/:id/prepare-claim', requireLogin, requireRole('security'), async (req, res) => {
   try {
     const itemId = req.params.id;
-    await db.run(`UPDATE items SET status = 'ready_for_claim', updated_at = ? WHERE id = ? AND type = 'found'`, [new Date().toISOString(), itemId]);
+    await db.run(`UPDATE items SET status = $1, updated_at = $2 WHERE id = $3 AND type = $4`, ['ready_for_claim', new Date().toISOString(), itemId, 'found']);
     res.redirect('/security');
   } catch (error) {
     console.error('Prepare claim error:', error);
@@ -467,9 +492,9 @@ app.post('/items/:id/prepare-claim', requireLogin, requireRole('security'), asyn
 app.post('/items/:id/mark-claimed', requireLogin, requireRole('security'), async (req, res) => {
   try {
     const itemId = req.params.id;
-    const item = await db.get('SELECT * FROM items WHERE id = ?', [itemId]);
+    const item = await db.get('SELECT * FROM items WHERE id = $1', [itemId]);
     if (item && item.type === 'lost') {
-      await db.run(`UPDATE items SET status = 'claimed', claimed_by = reported_by, updated_at = ? WHERE id = ?`, [new Date().toISOString(), itemId]);
+      await db.run(`UPDATE items SET status = $1, claimed_by = $2, updated_at = $3 WHERE id = $4`, ['claimed', item.reported_by, new Date().toISOString(), itemId]);
     }
     res.redirect('/security');
   } catch (error) {
@@ -481,11 +506,11 @@ app.post('/items/:id/mark-claimed', requireLogin, requireRole('security'), async
 app.post('/items/:id/request-claim', requireLogin, requireRole('user'), async (req, res) => {
   try {
     const itemId = req.params.id;
-    const existing = await db.get('SELECT * FROM claims WHERE item_id = ? AND user_id = ? AND status = ?', [itemId, req.session.user.id, 'pending']);
+    const existing = await db.get('SELECT * FROM claims WHERE item_id = $1 AND user_id = $2 AND status = $3', [itemId, req.session.user.id, 'pending']);
     if (!existing) {
       await db.run(
-        `INSERT INTO claims (item_id, user_id, status, requested_at) VALUES (?, ?, 'pending', ?)`,
-        [itemId, req.session.user.id, new Date().toISOString()]
+        `INSERT INTO claims (item_id, user_id, status, requested_at) VALUES ($1, $2, $3, $4)`,
+        [itemId, req.session.user.id, 'pending', new Date().toISOString()]
       );
     }
     res.redirect('/user');
@@ -498,10 +523,10 @@ app.post('/items/:id/request-claim', requireLogin, requireRole('user'), async (r
 app.post('/claims/:id/approve', requireLogin, requireRole('security'), async (req, res) => {
   try {
     const claimId = req.params.id;
-    const claim = await db.get('SELECT * FROM claims WHERE id = ?', [claimId]);
+    const claim = await db.get('SELECT * FROM claims WHERE id = $1', [claimId]);
     if (claim) {
-      await db.run('UPDATE claims SET status = ?, processed_at = ? WHERE id = ?', ['approved', new Date().toISOString(), claimId]);
-      await db.run('UPDATE items SET status = ?, claimed_by = ?, updated_at = ? WHERE id = ?', ['claimed', claim.user_id, new Date().toISOString(), claim.item_id]);
+      await db.run('UPDATE claims SET status = $1, processed_at = $2 WHERE id = $3', ['approved', new Date().toISOString(), claimId]);
+      await db.run('UPDATE items SET status = $1, claimed_by = $2, updated_at = $3 WHERE id = $4', ['claimed', claim.user_id, new Date().toISOString(), claim.item_id]);
     }
     res.redirect('/security');
   } catch (error) {
@@ -513,7 +538,7 @@ app.post('/claims/:id/approve', requireLogin, requireRole('security'), async (re
 app.post('/claims/:id/reject', requireLogin, requireRole('security'), async (req, res) => {
   try {
     const claimId = req.params.id;
-    await db.run('UPDATE claims SET status = ?, processed_at = ? WHERE id = ?', ['rejected', new Date().toISOString(), claimId]);
+    await db.run('UPDATE claims SET status = $1, processed_at = $2 WHERE id = $3', ['rejected', new Date().toISOString(), claimId]);
     res.redirect('/security');
   } catch (error) {
     console.error('Reject claim error:', error);
