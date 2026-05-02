@@ -163,7 +163,6 @@ app.use(
   })
 );
 
-let db;
 let server;
 
 async function createDatabase() {
@@ -403,11 +402,18 @@ app.get('/browse', requireLogin, (req, res) => {
 });
 
 app.get('/admin', requireLogin, requireRole('admin'), async (req, res) => {
-  const userCount = await db.get('SELECT COUNT(*) AS count FROM users');
-  const itemCount = await db.get('SELECT COUNT(*) AS count FROM items');
-  const foundCount = await db.get("SELECT COUNT(*) AS count FROM items WHERE type='found'");
-  const lostCount = await db.get("SELECT COUNT(*) AS count FROM items WHERE type='lost'");
-  const pendingClaims = await db.get("SELECT COUNT(*) AS count FROM claims WHERE status = 'pending'");
+  const [userCount, itemStats, pendingClaims] = await Promise.all([
+    db.get('SELECT COUNT(*) AS count FROM users'),
+    db.get(`
+      SELECT
+        COUNT(*) AS count,
+        SUM(CASE WHEN type = 'found' THEN 1 ELSE 0 END) AS found,
+        SUM(CASE WHEN type = 'lost' THEN 1 ELSE 0 END) AS lost
+      FROM items
+    `),
+    db.get("SELECT COUNT(*) AS count FROM claims WHERE status = 'pending'")
+  ]);
+
   const items = await db.all(
     `SELECT items.*, users.name AS reporter FROM items JOIN users ON items.reported_by = users.id ORDER BY items.created_at DESC LIMIT 50`
   );
@@ -419,9 +425,9 @@ app.get('/admin', requireLogin, requireRole('admin'), async (req, res) => {
     title: 'Admin Dashboard',
     metrics: {
       users: userCount.count,
-      items: itemCount.count,
-      found: foundCount.count,
-      lost: lostCount.count,
+      items: itemStats.count,
+      found: itemStats.found || 0,
+      lost: itemStats.lost || 0,
       claims: pendingClaims.count
     },
     items,
